@@ -1,0 +1,8 @@
+package id.go.big.spatial.dao;
+
+import java.util.Map;
+
+public interface KugiDao
+{
+	public void saveFeature(String schema, String entity, Map<String, Object> feature) throws Exception;
+}

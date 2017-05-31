@@ -1,0 +1,10 @@
+igd.schemas:IGD1000K, IGD500K, IGD250K, IGD100K, IGD50K, IGD25K, IGD10K, IGD5K, IGD1K
+#igd.shapefile.zipDir:/opt/source/pathShapefile
+#igd.shapefile.tempDir:/opt/source/tempShapefile
+igd.shapefile.zipDir:/home/oracle/pathShapefile
+igd.shapefile.tempDir:/home/oracle/tempShapefile
+
+connection.proxy.address:192.168.1.28
+connection.proxy.port:3128
+connection.connectTimeout:15000
+connection.readTimeout:0

@@ -1,0 +1,24 @@
+package id.go.big.spatial.dao;
+
+import java.util.Map;
+
+import javax.annotation.Resource;
+
+import org.hibernate.Session;
+import org.hibernate.SessionFactory;
+import org.springframework.stereotype.Repository;
+
+@Repository
+public class KugiDaoImpl implements KugiDao
+{
+	@Resource(name = "igd.sessionFactories")
+	private Map<String, SessionFactory> sessionFactories;
+
+	@Override
+	public void saveFeature(String schema, String entity, Map<String, Object> feature) throws Exception
+	{
+		SessionFactory sessionFactory = sessionFactories.get(schema);
+		Session session = sessionFactory.getCurrentSession();
+		session.saveOrUpdate(entity, feature);
+	}
+}

@@ -1,0 +1,171 @@
+package id.go.big.spatial.service;
+
+import java.io.File;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+import javax.annotation.Resource;
+
+import org.apache.commons.io.FileUtils;
+import org.apache.commons.lang3.RandomStringUtils;
+import org.apache.commons.lang3.StringUtils;
+import org.geotools.feature.FeatureCollection;
+import org.geotools.feature.FeatureIterator;
+import org.opengis.feature.simple.SimpleFeature;
+import org.opengis.feature.simple.SimpleFeatureType;
+import org.opengis.feature.type.AttributeDescriptor;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionStatus;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionCallback;
+import org.springframework.transaction.support.TransactionTemplate;
+
+import id.go.big.metadata.model.ig.dao.FeatureCodeDao;
+import id.go.big.metadata.model.ig.entity.FeatureCode;
+import id.go.big.spatial.dao.KugiDao;
+import id.go.big.spatial.exception.MdwException;
+
+@Service
+public class IGDService
+{
+	@Resource(name = "igd.transactionManagers")
+	private Map<String, PlatformTransactionManager> transactionManagers;	
+	private Map<String, TransactionTemplate> transactionTemplates = new HashMap<String, TransactionTemplate>();
+	
+	@Autowired
+	private DownloadService downloadService;
+	@Autowired
+	private ZipService zipService;	
+	@Autowired
+	private ShapefileService shapefileService;
+	
+	@Autowired
+	private FeatureCodeDao featureCodeDao;
+	
+	private final KugiDao kugiDao;
+	
+	@Value("${igd.shapefile.zipDir}")
+	private String zipDir;
+	@Value("${igd.shapefile.tempDir}")
+	private String tempDirRoot;
+	
+	@Autowired
+	public IGDService(FeatureCodeDao featureCodeDao, KugiDao kugiDao)
+	{
+		this.kugiDao = kugiDao;
+	}
+	
+	@Transactional(value = "metadata.transactionManager", propagation = Propagation.REQUIRED, readOnly = true)
+	public void saveIGD(String shapefileUrl, String orgCode) throws MdwException
+	{
+		String zipDirname = this.zipDir;
+		if(StringUtils.isNotBlank(orgCode))
+			zipDirname += "/"+orgCode;
+		File zipDir = new File(zipDirname);
+		zipDir.mkdirs();
+		
+		File shapefileZip = null;
+		try {shapefileZip = downloadService.downloadFile(shapefileUrl, zipDir);}
+		catch (IOException e) {throw new MdwException("39", "Error occured when downloading shapefile", e);}
+		
+		File tempDir = new File(tempDirRoot, String.valueOf(System.currentTimeMillis())+RandomStringUtils.randomNumeric(4));
+		tempDir.mkdirs();
+		
+		try {zipService.extract(tempDir, shapefileZip);}
+		catch (IOException e) {throw new MdwException("99", "Error occured when extracting shapefile", e);}
+
+		Map<String, List<Map<String, Object>>> featureListMap = null;
+		try {featureListMap = shapefilesToFeatureMaps(tempDir);}
+		catch (IOException e) {throw new MdwException("99", "Error when reading shapefile", e);}
+		
+		for(String fCode : featureListMap.keySet())
+		{
+			saveFeatures(fCode, featureListMap.get(fCode));
+		}		
+		
+		try {FileUtils.deleteDirectory(tempDir);}
+		catch (IOException e) {e.printStackTrace();}
+	}
+	
+	private Map<String, List<Map<String, Object>>> shapefilesToFeatureMaps(File shapefileDir) throws IOException
+	{
+		Map<String, List<Map<String, Object>>> featureListMap = new HashMap<String, List<Map<String, Object>>>();
+		for(File shpFile : FileUtils.listFiles(shapefileDir, new String[]{"shp"}, true))
+		{
+			FeatureCollection<SimpleFeatureType, SimpleFeature> featureCollection = shapefileService.getFeatures(shpFile);
+			FeatureIterator<SimpleFeature> features = featureCollection.features();
+			while(features.hasNext())
+			{
+				SimpleFeature feature = features.next();
+				
+				String fCode = (String) feature.getAttribute("FCODE");
+				fCode = "FA03010060";
+				if(StringUtils.isNotBlank(fCode))
+				{
+					Map<String, Object> featureMap = new HashMap<String, Object>();
+					
+					for(AttributeDescriptor desc : feature.getFeatureType().getAttributeDescriptors())
+					{
+						featureMap.put(desc.getLocalName().toUpperCase(), feature.getAttribute(desc.getLocalName()));
+					}
+					
+					if(!featureMap.containsKey("OBJECTID"))
+						featureMap.put("OBJECTID", Integer.valueOf(StringUtils.substringAfterLast(feature.getID(), ".")));
+					if(!featureMap.containsKey("SHAPE"))
+						featureMap.put("SHAPE", feature.getDefaultGeometry());
+					
+					if(!featureListMap.containsKey(fCode))
+						featureListMap.put(fCode, new ArrayList<Map<String, Object>>());
+					featureListMap.get(fCode).add(featureMap);
+				}
+			}
+		}
+		
+		return featureListMap;
+	}
+	
+	private void saveFeatures(String fCode, final List<Map<String, Object>> features)
+	{
+		FeatureCode featureCode = featureCodeDao.findByCode(fCode);
+		if(featureCode!=null)
+		{
+			final String entity = StringUtils.substringBeforeLast(featureCode.getAlias(), "_").toUpperCase();
+			final String schema = "IGD"+StringUtils.substringAfterLast(featureCode.getAlias(), "_").toUpperCase();
+			
+			if(!transactionTemplates.containsKey(schema))
+			{
+				TransactionTemplate transactionTemplate = new TransactionTemplate(transactionManagers.get(schema));
+				transactionTemplates.put(schema, transactionTemplate);
+			}
+			TransactionTemplate transactionTemplate = transactionTemplates.get(schema);;
+			transactionTemplate.execute(new TransactionCallback<Boolean>()
+			{
+				@Override
+				public Boolean doInTransaction(TransactionStatus status)
+				{
+					for(Map<String, Object> feature : features)
+					{
+						try
+						{
+							kugiDao.saveFeature(schema, entity, feature);
+						}
+						catch (Exception e)
+						{
+							e.printStackTrace();
+							return false;
+						}
+					}
+					
+					return true;
+				}
+			});
+		}
+	}
+}

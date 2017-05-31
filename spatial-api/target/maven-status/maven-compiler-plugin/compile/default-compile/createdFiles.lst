@@ -1,0 +1,14 @@
+id\go\big\spatial\test\IGDTest.class
+id\go\big\spatial\TestContext.class
+id\go\big\spatial\service\C3P0ConnectionFinder.class
+id\go\big\spatial\service\ZipService.class
+id\go\big\spatial\service\DownloadService.class
+id\go\big\spatial\service\ShapefileService.class
+id\go\big\spatial\dao\KugiDao.class
+id\go\big\spatial\service\DownloadService$2.class
+id\go\big\spatial\Context.class
+id\go\big\spatial\service\DownloadService$1.class
+id\go\big\spatial\service\IGDService$1.class
+id\go\big\spatial\exception\MdwException.class
+id\go\big\spatial\dao\KugiDaoImpl.class
+id\go\big\spatial\service\IGDService.class
